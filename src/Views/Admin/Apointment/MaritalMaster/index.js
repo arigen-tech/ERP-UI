@@ -45,8 +45,6 @@ const MaritalMaster = () => {
           name: marital.name,
           status: marital.status 
         }));
-
-        
   
         setMaritalData(transformedData);
         setTotalFilteredProducts(transformedData.length);
