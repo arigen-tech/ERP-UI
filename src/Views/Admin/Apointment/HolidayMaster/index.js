@@ -1,359 +1,605 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import Popup from "../../../../Components/popup";
+import LoadingScreen from "../../../../Components/Loading";
+import axios from "axios";
+import { API_HOST, HOLIDAY_STATUS } from "../../../../config/apiConfig";
+import { postRequest, putRequest, getRequest } from "../../../../service/apiService";
 
 const HolidayMaster = () => {
-  const [formData, setFormData] = useState({ holidayName: "", holidayDate: "" });
+  const [holidayData, setHolidayData] = useState([]);
+  const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, holidayId: null, newStatus: false });
+  const [loading, setLoading] = useState(true);
+
+  const [formData, setFormData] = useState({
+    name: "",
+    year: new Date().getFullYear(),
+    holidayDate: "",
+    rh: "NO"
+  });
+  const [searchQuery, setSearchQuery] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [isFormValid, setIsFormValid] = useState(false);
-  const [editingHoliday, setEditingHoliday] = useState(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageInput, setPageInput] = useState("");
   const [showModal, setShowModal] = useState(false);
-  const itemsPerPage = 5;
+  const [editingHoliday, setEditingHoliday] = useState(null);
+  const [popupMessage, setPopupMessage] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [filteredTotalPages, setFilteredTotalPages] = useState(1);
+  const [totalFilteredHolidays, setTotalFilteredHolidays] = useState(0);
+  const [itemsPerPage] = useState(10);
+  const [pageInput, setPageInput] = useState(1);
 
-  const [holidayData, setHolidayData] = useState([
-    { id: 1, holidayName: "New Year", holidayDate: "2025-01-01", status: "y" },
-    { id: 2, holidayName: "Republic Day", holidayDate: "2025-01-26", status: "y" },
-    { id: 3, holidayName: "Independence Day", holidayDate: "2025-08-15", status: "y" },
-  ]);
+  const NAME_MAX_LENGTH = 100;
+  const YEAR_MIN = 1900;
+  const YEAR_MAX = 2100;
 
-  const [confirmDialog, setConfirmDialog] = useState({
-    isOpen: false,
-    holidayId: null,
-    newStatus: null,
-  });
+  useEffect(() => {
+    fetchHolidayData(0);
+  }, []);
 
-  const filteredHolidays = holidayData.filter((holiday) =>
-    holiday.holidayName.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const fetchHolidayData = async (flag = 0) => {
+    try {
+      setLoading(true);
+      const response = await getRequest(`${HOLIDAY_STATUS}/all/${flag}`);
 
-  const filteredTotalPages = Math.ceil(filteredHolidays.length / itemsPerPage);
+      if (response && response.response) {
+        const transformedData = response.response.map(holiday => ({
+          id: holiday.id,
+          name: holiday.name,
+          year: holiday.year,
+          holidayDate: holiday.holidayDate,
+          rh: holiday.rh,
+          status: holiday.status
+        }));
 
-  const currentItems = filteredHolidays.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  );
+        setHolidayData(transformedData);
+        setTotalFilteredHolidays(transformedData.length);
+        setFilteredTotalPages(Math.ceil(transformedData.length / itemsPerPage));
+      }
+    } catch (err) {
+      console.error("Error fetching holiday data:", err);
+      showPopup("Failed to load holiday data", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const handleSearch = (e) => {
+  const handleSearchChange = (e) => {
     setSearchQuery(e.target.value);
     setCurrentPage(1);
+  };
+
+  const filteredHolidayData = holidayData.filter(holiday =>
+    holiday.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    holiday.year.toString().includes(searchQuery) ||
+    holiday.holidayDate.includes(searchQuery)
+  );
+
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = filteredHolidayData.slice(indexOfFirstItem, indexOfLastItem);
+
+  const handleEdit = (holiday) => {
+    setEditingHoliday(holiday);
+    setFormData({
+      name: holiday.name,
+      year: holiday.year,
+      holidayDate: holiday.holidayDate,
+      rh: holiday.rh
+    });
+    setIsFormValid(true);
+    setShowForm(true);
+  };
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    if (!isFormValid) return;
+
+    try {
+      setLoading(true);
+
+      // Validate year range
+      if (formData.year < YEAR_MIN || formData.year > YEAR_MAX) {
+        showPopup(`Year must be between ${YEAR_MIN} and ${YEAR_MAX}`, "error");
+        setLoading(false);
+        return;
+      }
+
+      // Validate date is not in past
+      // const selectedDate = new Date(formData.holidayDate);
+      // const today = new Date();
+      // today.setHours(0, 0, 0, 0);
+      
+      // if (selectedDate < today) {
+      //   showPopup("Holiday date cannot be in the past", "error");
+      //   setLoading(false);
+      //   return;
+      // }
+
+      if (editingHoliday) {
+        // Check for duplicates before updating (excluding the current item being edited)
+        const isDuplicate = holidayData.some(
+          (holiday) =>
+            holiday.id !== editingHoliday.id && // Exclude the current item
+            (holiday.name === formData.name &&
+             holiday.year === formData.year &&
+             holiday.holidayDate === formData.holidayDate)
+        );
+
+        if (isDuplicate) {
+          showPopup("Holiday already exists for this year and date!", "error");
+          setLoading(false);
+          return;
+        }
+
+        const response = await putRequest(`${HOLIDAY_STATUS}/update/${editingHoliday.id}`, {
+          name: formData.name,
+          year: formData.year,
+          holidayDate: formData.holidayDate,
+          rh: formData.rh
+        });
+
+        if (response && response.response) {
+          setHolidayData(holidayData.map(holiday =>
+            holiday.id === editingHoliday.id ? response.response : holiday
+          ));
+          showPopup("Holiday updated successfully!", "success");
+        }
+      } else {
+        // Check for duplicates before creating
+        const isDuplicate = holidayData.some(
+          (holiday) =>
+            holiday.name === formData.name &&
+            holiday.year === formData.year &&
+            holiday.holidayDate === formData.holidayDate
+        );
+
+        if (isDuplicate) {
+          showPopup("Holiday already exists for this year and date!", "error");
+          setLoading(false);
+          return;
+        }
+
+        const response = await postRequest(`${HOLIDAY_STATUS}/create`, {
+          name: formData.name,
+          year: formData.year,
+          holidayDate: formData.holidayDate,
+          rh: formData.rh
+        });
+
+        if (response && response.response) {
+          setHolidayData([...holidayData, response.response]);
+          showPopup("New holiday added successfully!", "success");
+        }
+      }
+
+      setEditingHoliday(null);
+      setFormData({ 
+        name: "", 
+        year: new Date().getFullYear(), 
+        holidayDate: "", 
+        rh: "NO" 
+      });
+      setShowForm(false);
+      fetchHolidayData();
+    } catch (err) {
+      console.error("Error saving holiday data:", err);
+      showPopup(`Failed to save changes: ${err.response?.data?.message || err.message}`, "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const showPopup = (message, type = 'info') => {
+    setPopupMessage({
+      message,
+      type,
+      onClose: () => {
+        setPopupMessage(null);
+      }
+    });
   };
 
   const handleSwitchChange = (id, newStatus) => {
     setConfirmDialog({ isOpen: true, holidayId: id, newStatus });
   };
 
-  const handleConfirm = (confirmed) => {
+  const handleConfirm = async (confirmed) => {
     if (confirmed && confirmDialog.holidayId !== null) {
-      setHolidayData((prev) =>
-        prev.map((holiday) =>
-          holiday.id === confirmDialog.holidayId
-            ? { ...holiday, status: confirmDialog.newStatus }
-            : holiday
-        )
-      );
+      try {
+        setLoading(true);
+
+        const response = await putRequest(
+          `${HOLIDAY_STATUS}/change/${confirmDialog.holidayId}?status=${confirmDialog.newStatus}`
+        );
+
+        if (response && response.response) {
+          setHolidayData((prevData) =>
+            prevData.map((holiday) =>
+              holiday.id === confirmDialog.holidayId ?
+                { ...holiday, status: confirmDialog.newStatus } :
+                holiday
+            )
+          );
+          showPopup(`Holiday ${confirmDialog.newStatus === "y" ? "activated" : "deactivated"} successfully!`, "success");
+        }
+      } catch (err) {
+        console.error("Error updating holiday status:", err);
+        showPopup(`Failed to update status: ${err.response?.data?.message || err.message}`, "error");
+      } finally {
+        setTimeout(() => {
+          setLoading(false);
+        }, 2000);
+      }
     }
     setConfirmDialog({ isOpen: false, holidayId: null, newStatus: null });
   };
 
-  const handleEdit = (holiday) => {
-    setEditingHoliday(holiday);
-    setFormData({
-      holidayName: holiday.holidayName,
-      holidayDate: holiday.holidayDate,
-    });
-    setShowForm(true);
+  const handleInputChange = (e) => {
+    const { id, value } = e.target;
+    setFormData((prevData) => ({ ...prevData, [id]: value }));
+
+    // Validate form
+    const { name, year, holidayDate, rh } = id === "name" ? 
+      { ...formData, name: value } : 
+      id === "year" ? 
+      { ...formData, year: value } : 
+      id === "holidayDate" ? 
+      { ...formData, holidayDate: value } : 
+      { ...formData, rh: value };
+
+    setIsFormValid(
+      name.trim() !== "" &&
+      year.toString().trim() !== "" &&
+      holidayDate.trim() !== "" &&
+      rh.trim() !== ""
+    );
   };
 
-  const handleSave = (e) => {
-    e.preventDefault();
-    const { holidayName, holidayDate } = formData;
-    if (!holidayName || !holidayDate) return;
-
-    if (editingHoliday) {
-      setHolidayData((prev) =>
-        prev.map((holiday) =>
-          holiday.id === editingHoliday.id
-            ? { ...holiday, holidayName, holidayDate }
-            : holiday
-        )
-      );
-    } else {
-      setHolidayData([
-        ...holidayData,
-        { id: Date.now(), holidayName, holidayDate, status: "y" },
-      ]);
-    }
-
-    setEditingHoliday(null);
-    setShowForm(false);
-    setFormData({ holidayName: "", holidayDate: "" });
-    setIsFormValid(false);
-  };
-
-  const renderPagination = () => {
-    const pages = [];
-    for (let i = 1; i <= filteredTotalPages; i++) {
-      pages.push(
-        <li
-          key={i}
-          className={`page-item ${i === currentPage ? "active" : ""}`}
-        >
-          <button className="page-link" onClick={() => setCurrentPage(i)}>
-            {i}
-          </button>
-        </li>
-      );
-    }
-    return pages;
+  const handleRefresh = () => {
+    setSearchQuery("");
+    setCurrentPage(1);
+    fetchHolidayData();
   };
 
   const handlePageNavigation = () => {
-    const page = parseInt(pageInput);
-    if (page > 0 && page <= filteredTotalPages) {
-      setCurrentPage(page);
-    } else {
-      alert("Invalid page number");
+    const pageNumber = Number(pageInput);
+    if (pageNumber >= 1 && pageNumber <= filteredTotalPages) {
+      setCurrentPage(pageNumber);
     }
   };
 
+  const renderPagination = () => {
+    const pageNumbers = [];
+    const maxVisiblePages = 5;
+    let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+    const endPage = Math.min(filteredTotalPages, startPage + maxVisiblePages - 1);
+
+    if (endPage - startPage < maxVisiblePages - 1) {
+      startPage = Math.max(1, endPage - maxVisiblePages + 1);
+    }
+
+    if (startPage > 1) {
+      pageNumbers.push(1);
+      if (startPage > 2) pageNumbers.push("...");
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+      pageNumbers.push(i);
+    }
+
+    if (endPage < filteredTotalPages) {
+      if (endPage < filteredTotalPages - 1) pageNumbers.push("...");
+      pageNumbers.push(filteredTotalPages);
+    }
+
+    return pageNumbers.map((number, index) => (
+      <li key={index} className={`page-item ${number === currentPage ? "active" : ""}`}>
+        {typeof number === "number" ? (
+          <button className="page-link" onClick={() => setCurrentPage(number)}>
+            {number}
+          </button>
+        ) : (
+          <span className="page-link disabled">{number}</span>
+        )}
+      </li>
+    ));
+  };
+
+  // Get current year for default value
+  const currentYear = new Date().getFullYear();
+
   return (
     <div className="content-wrapper">
-      <div className="card">
-        <div className="card-header d-flex justify-content-between align-items-center">
-          <h4 className="card-title">Holiday Master</h4>
-          {!showForm && (
-            <div className="d-flex gap-2">
-              <input
-                type="search"
-                className="form-control"
-                placeholder="Search Holiday"
-                value={searchQuery}
-                onChange={handleSearch}
-              />
-              <button
-                className="btn btn-success"
-                onClick={() => {
-                  setFormData({ holidayName: "", holidayDate: "" });
-                  setShowForm(true);
-                }}
-              >
-                <i className="mdi mdi-plus"></i> Add
-              </button>
-              <button
-                className="btn btn-success"
-                onClick={() => setShowModal(true)}
-              >
-                <i className="mdi mdi-file-document"></i> Reports
-              </button>
-            </div>
-          )}
-          {showForm && (
-            <button
-              className="btn btn-secondary"
-              onClick={() => setShowForm(false)}
-            >
-              <i className="mdi mdi-arrow-left"></i> Back
-            </button>
-          )}
-        </div>
-        <div className="card-body">
-          {!showForm ? (
-            <>
-              <table className="table table-bordered table-hover">
-                <thead className="table-light">
-                  <tr>
-                    <th>Holiday Name</th>
-                    <th>Date</th>
-                    <th>Status</th>
-                    <th>Edit</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {currentItems.map((holiday) => (
-                    <tr key={holiday.id}>
-                      <td>{holiday.holidayName}</td>
-                      <td>{holiday.holidayDate}</td>
-                      <td>
-                        <div className="form-check form-switch">
-                          <input
-                            type="checkbox"
-                            className="form-check-input"
-                            checked={holiday.status === "y"}
-                            onChange={() =>
-                              handleSwitchChange(
-                                holiday.id,
-                                holiday.status === "y" ? "n" : "y"
-                              )
-                            }
-                          />
-                          <label className="form-check-label">
-                            {holiday.status === "y" ? "Active" : "Inactive"}
-                          </label>
-                        </div>
-                      </td>
-                      <td>
-                        <button
-                          className="btn btn-sm btn-primary"
-                          onClick={() => handleEdit(holiday)}
-                          disabled={holiday.status !== "y"}
-                        >
-                          <i className="fa fa-pencil"></i>
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      <div className="row">
+        <div className="col-12 grid-margin stretch-card">
+          <div className="card form-card">
+            <div className="card-header d-flex justify-content-between align-items-center">
+              <h4 className="card-title">Holiday Master</h4>
+              <div className="d-flex justify-content-between align-items-center">
+                <form className="d-inline-block searchform me-4" role="search">
+                  <div className="input-group searchinput">
+                    <input
+                      type="search"
+                      className="form-control"
+                      placeholder="Search"
+                      aria-label="Search"
+                      value={searchQuery}
+                      onChange={handleSearchChange}
+                    />
+                    <span className="input-group-text" id="search-icon">
+                      <i className="fa fa-search"></i>
+                    </span>
+                  </div>
+                </form>
 
-              <nav className="d-flex justify-content-between align-items-center mt-3">
-                <span>
-                  Page {currentPage} of {filteredTotalPages} | Total Records:{" "}
-                  {filteredHolidays.length}
-                </span>
-                <ul className="pagination mb-0">{renderPagination()}</ul>
-                <div className="d-flex">
-                  <input
-                    type="number"
-                    className="form-control me-2"
-                    value={pageInput}
-                    onChange={(e) => setPageInput(e.target.value)}
-                    placeholder="Go to page"
-                  />
-                  <button
-                    className="btn btn-primary"
-                    onClick={handlePageNavigation}
-                  >
-                    Go
-                  </button>
+                <div className="d-flex align-items-center">
+                  {!showForm ? (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-success me-2"
+                        onClick={() => {
+                          setEditingHoliday(null);
+                          setFormData({ 
+                            name: "", 
+                            year: currentYear, 
+                            holidayDate: "", 
+                            rh: "NO" 
+                          });
+                          setIsFormValid(false);
+                          setShowForm(true);
+                        }}
+                      >
+                        <i className="mdi mdi-plus"></i> Add
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-success me-2 flex-shrink-0"
+                        onClick={handleRefresh}
+                      >
+                        <i className="mdi mdi-refresh"></i> Show All
+                      </button>
+                    </>
+                  ) : (
+                    <button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>
+                      <i className="mdi mdi-arrow-left"></i> Back
+                    </button>
+                  )}
                 </div>
-              </nav>
-            </>
-          ) : (
-            <form onSubmit={handleSave} className="row">
-              <div className="form-group col-md-4">
-                <label>
-                  Holiday Name <span className="text-danger">*</span>
-                </label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={formData.holidayName}
-                  onChange={(e) =>
-                    setFormData({ ...formData, holidayName: e.target.value })
-                  }
-                  onInput={() => setIsFormValid(true)}
-                  required
+              </div>
+            </div>
+            <div className="card-body">
+              {loading ? (
+                <LoadingScreen />
+              ) : !showForm ? (
+                <div className="table-responsive packagelist">
+                  <table className="table table-bordered table-hover align-middle">
+                    <thead className="table-light">
+                      <tr>
+                        <th>Holiday Name</th>
+                        <th>Year</th>
+                        <th>Date</th>
+                        <th>RH</th>
+                        <th>Status</th>
+                        <th>Edit</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {currentItems.length > 0 ? (
+                        currentItems.map((holiday) => (
+                          <tr key={holiday.id}>
+                            <td>{holiday.name}</td>
+                            <td>{holiday.year}</td>
+                            <td>{holiday.holidayDate}</td>
+                            <td>{holiday.rh}</td>
+                            <td>
+                              <div className="form-check form-switch">
+                                <input
+                                  className="form-check-input"
+                                  type="checkbox"
+                                  checked={holiday.status === "y"}
+                                  onChange={() => handleSwitchChange(holiday.id, holiday.status === "y" ? "n" : "y")}
+                                  id={`switch-${holiday.id}`}
+                                />
+                                <label
+                                  className="form-check-label px-0"
+                                  htmlFor={`switch-${holiday.id}`}
+                                >
+                                  {holiday.status === "y" ? 'Active' : 'Deactivated'}
+                                </label>
+                              </div>
+                            </td>
+                            <td>
+                              <button
+                                className="btn btn-sm btn-success me-2"
+                                onClick={() => handleEdit(holiday)}
+                                disabled={holiday.status !== "y"}
+                              >
+                                <i className="fa fa-pencil"></i>
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan="6" className="text-center">No holiday data found</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                  {filteredHolidayData.length > 0 && (
+                    <nav className="d-flex justify-content-between align-items-center mt-3">
+                      <div>
+                        <span>
+                          Page {currentPage} of {filteredTotalPages} | Total Records: {filteredHolidayData.length}
+                        </span>
+                      </div>
+                      <ul className="pagination mb-0">
+                        <li className={`page-item ${currentPage === 1 ? "disabled" : ""}`}>
+                          <button
+                            className="page-link"
+                            onClick={() => setCurrentPage(currentPage - 1)}
+                            disabled={currentPage === 1}
+                          >
+                            &laquo; Previous
+                          </button>
+                        </li>
+                        {renderPagination()}
+                        <li className={`page-item ${currentPage === filteredTotalPages ? "disabled" : ""}`}>
+                          <button
+                            className="page-link"
+                            onClick={() => setCurrentPage(currentPage + 1)}
+                            disabled={currentPage === filteredTotalPages}
+                          >
+                            Next &raquo;
+                          </button>
+                        </li>
+                      </ul>
+                      <div className="d-flex align-items-center">
+                        <input
+                          type="number"
+                          min="1"
+                          max={filteredTotalPages}
+                          value={pageInput}
+                          onChange={(e) => setPageInput(e.target.value)}
+                          placeholder="Go to page"
+                          className="form-control me-2"
+                        />
+                        <button
+                          className="btn btn-primary"
+                          onClick={handlePageNavigation}
+                        >
+                          Go
+                        </button>
+                      </div>
+                    </nav>
+                  )}
+                </div>
+              ) : (
+                <form className="forms row" onSubmit={handleSave}>
+                  <div className="form-group col-md-3">
+                    <label>Holiday Name <span className="text-danger">*</span></label>
+                    <input
+                      type="text"
+                      className="form-control mt-1"
+                      id="name"
+                      name="name"
+                      placeholder="Holiday Name"
+                      value={formData.name}
+                      onChange={handleInputChange}
+                      maxLength={NAME_MAX_LENGTH}
+                      required
+                    />
+                  </div>
+                  <div className="form-group col-md-2">
+                    <label>Year <span className="text-danger">*</span></label>
+                    <input
+                      type="number"
+                      className="form-control mt-1"
+                      id="year"
+                      name="year"
+                      placeholder="Year"
+                      value={formData.year}
+                      onChange={handleInputChange}
+                      min={YEAR_MIN}
+                      max={YEAR_MAX}
+                      required
+                    />
+                  </div>
+                  <div className="form-group col-md-2">
+                    <label>Holiday Date <span className="text-danger">*</span></label>
+                    <input
+                      type="date"
+                      className="form-control mt-1"
+                      id="holidayDate"
+                      name="holidayDate"
+                      value={formData.holidayDate}
+                      onChange={handleInputChange}
+                      required
+                    />
+                  </div>
+                  <div className="form-group col-md-2">
+                    <label>RH <span className="text-danger">*</span></label>
+                    <select
+                      className="form-control mt-1"
+                      id="rh"
+                      name="rh"
+                      value={formData.rh}
+                      onChange={handleInputChange}
+                      required
+                    >
+                      <option value="NO">No</option>
+                      <option value="YES">Yes</option>
+                    </select>
+                  </div>
+                  <div className="form-group col-md-12 d-flex justify-content-end mt-2">
+                    <button type="submit" className="btn btn-primary me-2" disabled={!isFormValid}>
+                      Save
+                    </button>
+                    <button type="button" className="btn btn-danger" onClick={() => setShowForm(false)}>
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              )}
+              {showModal && (
+                <div className="modal fade show" style={{ display: 'block' }} tabIndex="-1" aria-labelledby="staticBackdropLabel" aria-hidden="true">
+                  <div className="modal-dialog">
+                    <div className="modal-content">
+                      <div className="modal-header">
+                        <h1 className="modal-title fs-5" id="staticBackdropLabel">Holiday Reports</h1>
+                        <button type="button" className="btn-close" onClick={() => setShowModal(false)} aria-label="Close"></button>
+                      </div>
+                      <div className="modal-body">
+                        <p>Generate reports for holiday data:</p>
+                        <div className="list-group">
+                          <button type="button" className="list-group-item list-group-item-action">Holiday Calendar Report</button>
+                          <button type="button" className="list-group-item list-group-item-action">RH Holiday Report</button>
+                          <button type="button" className="list-group-item list-group-item-action">Year-wise Holiday Report</button>
+                        </div>
+                      </div>
+                      <div className="modal-footer">
+                        <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Close</button>
+                        <button type="button" className="btn btn-primary">Generate Report</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {popupMessage && (
+                <Popup
+                  message={popupMessage.message}
+                  type={popupMessage.type}
+                  onClose={popupMessage.onClose}
                 />
-              </div>
-              <div className="form-group col-md-4">
-                <label>
-                  Holiday Date <span className="text-danger">*</span>
-                </label>
-                <input
-                  type="date"
-                  className="form-control"
-                  value={formData.holidayDate}
-                  onChange={(e) =>
-                    setFormData({ ...formData, holidayDate: e.target.value })
-                  }
-                  onInput={() => setIsFormValid(true)}
-                  required
-                />
-              </div>
-              <div className="form-group col-md-12 mt-2 d-flex justify-content-end">
-                <button
-                  type="submit"
-                  className="btn btn-primary me-2"
-                  disabled={!isFormValid}
-                >
-                  Save
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-danger"
-                  onClick={() => setShowForm(false)}
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          )}
+              )}
+              {confirmDialog.isOpen && (
+                <div className="modal d-block" tabIndex="-1" role="dialog">
+                  <div className="modal-dialog" role="document">
+                    <div className="modal-content">
+                      <div className="modal-header">
+                        <h5 className="modal-title">Confirm Status Change</h5>
+                        <button type="button" className="close" onClick={() => handleConfirm(false)}>
+                          <span>&times;</span>
+                        </button>
+                      </div>
+                      <div className="modal-body">
+                        <p>
+                          Are you sure you want to {confirmDialog.newStatus === "y" ? 'activate' : 'deactivate'} <strong>{holidayData.find(holiday => holiday.id === confirmDialog.holidayId)?.name}</strong>?
+                        </p>
+                      </div>
+                      <div className="modal-footer">
+                        <button type="button" className="btn btn-secondary" onClick={() => handleConfirm(false)}>No</button>
+                        <button type="button" className="btn btn-primary" onClick={() => handleConfirm(true)}>Yes</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
-
-      {/* Reports Modal */}
-      {showModal && (
-        <div className="modal fade show" style={{ display: "block" }}>
-          <div className="modal-dialog">
-            <div className="modal-content">
-              <div className="modal-header">
-                <h5 className="modal-title">Holiday Reports</h5>
-                <button
-                  className="btn-close"
-                  onClick={() => setShowModal(false)}
-                ></button>
-              </div>
-              <div className="modal-body">
-                <p>Report will be implemented...</p>
-              </div>
-              <div className="modal-footer">
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => setShowModal(false)}
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Confirm Modal */}
-      {confirmDialog.isOpen && (
-        <div className="modal d-block" tabIndex="-1">
-          <div className="modal-dialog">
-            <div className="modal-content">
-              <div className="modal-header">
-                <h5 className="modal-title">Confirm Status Change</h5>
-                <button
-                  className="btn-close"
-                  onClick={() => handleConfirm(false)}
-                ></button>
-              </div>
-              <div className="modal-body">
-                <p>
-                  Are you sure you want to{" "}
-                  {confirmDialog.newStatus === "y" ? "activate" : "deactivate"}{" "}
-                  <strong>
-                    {
-                      holidayData.find(
-                        (h) => h.id === confirmDialog.holidayId
-                      )?.holidayName
-                    }
-                  </strong>
-                  ?
-                </p>
-              </div>
-              <div className="modal-footer">
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => handleConfirm(false)}
-                >
-                  No
-                </button>
-                <button
-                  className="btn btn-primary"
-                  onClick={() => handleConfirm(true)}
-                >
-                  Yes
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
