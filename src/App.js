@@ -27,6 +27,7 @@ const CategoryMaster = React.lazy(() => import('./Views/Admin/Apointment/Categor
 const BlockMaster = React.lazy(() => import('./Views/Admin/Apointment/BlockMaster'));
 const LeavetypeMaster = React.lazy(() => import('./Views/Admin/Apointment/LeavetypeMaster'));
 const CentreMaster = React.lazy(() => import('./Views/Admin/Apointment/CentreMaster'));
+const ItemClassMaster = React.lazy(() => import('./Views/Admin/Apointment/ItemclassMaster'));
 
 
 
@@ -65,6 +66,7 @@ function App() {
               <Route path="/BlockMaster" element={<BlockMaster />} />
               <Route path="/LeavetypeMaster" element={<LeavetypeMaster />} />
               <Route path="/CentreMaster" element={<CentreMaster />} />
+              <Route path="/ItemClassMaster" element={<ItemClassMaster />} />
             </Route>
         </Routes>
       </Suspense>

@@ -164,6 +164,12 @@ const Sidebar = () => {
                   </Link>
                 </li>
 
+                <li>
+                  <Link className="ms-link" to="ItemClassMaster">
+                    Itemclass Master
+                  </Link>
+                </li>
+
 
 
                
