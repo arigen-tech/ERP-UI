@@ -13,3 +13,5 @@ export const LEAVE_STATUS = `${MASTERS}/leave-status`;
 export const QUALIFICATION_STATUS = `${MASTERS}/qualification-status`;
 export const RELIGION_STATUS = `${MASTERS}/religion-status`;
 export const HOLIDAY_STATUS = `${MASTERS}/holiday-status`;
+export const INSTITUTE_STATUS = `${MASTERS}/institute-status`;
+export const CASTE_STATUS = `${MASTERS}/caste-status`;
